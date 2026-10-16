@@ -1,16 +1,16 @@
 import { createHash, randomBytes } from "node:crypto";
 
-const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const LEGACY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 export function isRoomCode(code: string): boolean {
-  return /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/.test(code);
+  return /^[0-9]{6}$/.test(code) || new RegExp(`^[${LEGACY_ALPHABET}]{6}$`).test(code);
 }
 
 export function newRoomCode(): string {
   const bytes = randomBytes(6);
   let code = "";
   for (let index = 0; index < 6; index += 1) {
-    code += ALPHABET[bytes[index]! % ALPHABET.length];
+    code += String(bytes[index]! % 10);
   }
   return code;
 }

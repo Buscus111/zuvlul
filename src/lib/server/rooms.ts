@@ -1,10 +1,17 @@
 import { scoreOptions, type Ballot } from "#lib/score";
-import { isScaleId, isValidMark, type ScaleId } from "#lib/scales";
+import { isChoiceMode, isScaleId, isValidMark, scaleForMode, type ChoiceMode, type ScaleId } from "#lib/scales";
 import type { Phase, PublicState } from "#lib/types";
 import type { DB } from "./db";
 import { RoomError } from "./errors";
 import { hashSecret, isRoomCode, newId, newRoomCode, newSecret } from "./ids";
-import { MAX_PARTICIPANTS, cleanOptionFields, cleanPersonName, type CreateInput } from "./parse";
+import {
+  DEFAULT_PARTICIPANTS,
+  MAX_PARTICIPANTS,
+  MIN_PARTICIPANTS,
+  cleanOptionFields,
+  cleanPersonName,
+  type CreateInput,
+} from "./parse";
 
 type RoomRow = {
   id: string;
@@ -12,11 +19,13 @@ type RoomRow = {
   host_token_hash: string;
   host_participant_id: string;
   scale: ScaleId;
+  mode: ChoiceMode;
   collect_ms: number;
   vote_ms: number;
   phase: Phase;
   phase_ends_at: number | null;
   max_participants: number;
+  show_authors: number;
   created_at: number;
 };
 
@@ -54,6 +63,25 @@ export type CreatedRoom = {
 const OPTION_CAP = 30;
 const PER_PERSON_CAP = 10;
 
+function participantCap(input: CreateInput): number {
+  const cap = input.maxParticipants ?? DEFAULT_PARTICIPANTS;
+  if (!Number.isInteger(cap) || cap < MIN_PARTICIPANTS || cap > MAX_PARTICIPANTS) {
+    throw new RoomError("Участники: укажи целое число от 2 до 10");
+  }
+  return cap;
+}
+
+function peopleLabel(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} человека`;
+  return `${count} человек`;
+}
+
+function roomMode(room: RoomRow): ChoiceMode {
+  return room.mode === "close" ? "close" : "diverse";
+}
+
 function roomById(db: DB, code: string): RoomRow | null {
   const row = db.prepare("SELECT * FROM rooms WHERE id = ?").get(code) as RoomRow | undefined;
   if (!row || !isScaleId(row.scale)) return null;
@@ -87,7 +115,7 @@ function isHost(room: RoomRow, hostToken: string | null): boolean {
 
 function assertHost(room: RoomRow, hostToken: string | null) {
   if (!isHost(room, hostToken)) {
-    throw new RoomError("Это может сделать только хозяин комнаты", 403);
+    throw new RoomError("Это может сделать только владелец комнаты", 403);
   }
 }
 
@@ -192,6 +220,7 @@ function readState(db: DB, code: string, auth: Auth, now: number): PublicState |
     code: room.id,
     title: room.title,
     phase: room.phase,
+    mode: roomMode(room),
     scale: room.scale,
     serverNow: now,
     phaseEndsAt: room.phase_ends_at,
@@ -200,6 +229,7 @@ function readState(db: DB, code: string, auth: Auth, now: number): PublicState |
     participantCount: people.length,
     maxParticipants: room.max_participants,
     optionCount: options.length,
+    showAuthors: room.show_authors === 1,
   };
 
   if (!me) {
@@ -228,13 +258,18 @@ function readState(db: DB, code: string, auth: Auth, now: number): PublicState |
         : [],
     ballot:
       room.phase === "voting"
-        ? options.map(({ id, title, note, link, my_value }) => ({
-            id,
-            title,
-            note,
-            link,
-            mineRating: my_value,
-          }))
+        ? options.map((option) => {
+            const card: PublicState["ballot"][number] = {
+              id: option.id,
+              title: option.title,
+              note: option.note,
+              link: option.link,
+              mineRating: option.my_value,
+            };
+            const authorName = visibleAuthor(room, people, option.author_id);
+            if (authorName) card.authorName = authorName;
+            return card;
+          })
         : [],
     results,
   };
@@ -247,10 +282,15 @@ function ratingOf(db: DB, optionId: string, participantId: string): string {
   return row?.value ?? "skip";
 }
 
+function visibleAuthor(room: RoomRow, people: ParticipantRow[], authorId: string): string | undefined {
+  if (room.show_authors !== 1) return undefined;
+  return people.find((person) => person.id === authorId)?.name;
+}
+
 function resultsFromDb(db: DB, room: RoomRow) {
   const options = db
     .prepare(
-      `SELECT id, title, note, link, created_at FROM options
+      `SELECT id, title, note, link, author_id, created_at FROM options
        WHERE room_id = ? ORDER BY created_at ASC, id ASC`,
     )
     .all(room.id) as {
@@ -258,9 +298,10 @@ function resultsFromDb(db: DB, room: RoomRow) {
     title: string;
     note: string;
     link: string;
+    author_id: string;
     created_at: number;
   }[];
-  return scoreOptions(
+  const outcome = scoreOptions(
     room.scale,
     options.map((option) => ({
       id: option.id,
@@ -270,7 +311,18 @@ function resultsFromDb(db: DB, room: RoomRow) {
       createdAt: option.created_at,
     })),
     ballotsFor(db, room.id, room.scale),
+    roomMode(room),
   );
+  if (room.show_authors !== 1) return outcome;
+  const people = participants(db, room.id);
+  return {
+    ...outcome,
+    ranking: outcome.ranking.map((row) => {
+      const source = options.find((option) => option.id === row.id);
+      const authorName = source ? visibleAuthor(room, people, source.author_id) : undefined;
+      return authorName ? { ...row, authorName } : row;
+    }),
+  };
 }
 
 function ballotsFor(db: DB, roomId: string, scale: ScaleId): Ballot[] {
@@ -299,7 +351,9 @@ export function getPublicState(db: DB, code: string, auth: Auth, now = Date.now(
 }
 
 export function createRoom(db: DB, input: CreateInput, now = Date.now()): CreatedRoom {
-  if (!isScaleId(input.scale)) throw new RoomError("Выбери шкалу");
+  const mode = input.mode && isChoiceMode(input.mode) ? input.mode : input.scale === "score10" ? "close" : "diverse";
+  const scale = input.mode && isChoiceMode(input.mode) ? scaleForMode(input.mode) : input.scale;
+  if (!isScaleId(scale)) throw new RoomError("Выбери шкалу");
   const participantSecret = newSecret();
   const hostSecret = newSecret();
   const participantId = newId();
@@ -312,18 +366,20 @@ export function createRoom(db: DB, input: CreateInput, now = Date.now()): Create
     }
     db.prepare(
       `INSERT INTO rooms (
-        id, title, host_token_hash, host_participant_id, scale, collect_ms, vote_ms,
-        phase, phase_ends_at, max_participants, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'lobby', NULL, ?, ?)`,
+        id, title, host_token_hash, host_participant_id, scale, mode, collect_ms, vote_ms,
+        phase, phase_ends_at, max_participants, show_authors, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', NULL, ?, ?, ?)`,
     ).run(
       code,
       input.title,
       hostSecret.hash,
       participantId,
-      input.scale,
+      scale,
+      mode,
       input.collectMs,
       input.voteMs,
-      MAX_PARTICIPANTS,
+      participantCap(input),
+      input.showAuthors ? 1 : 0,
       now,
     );
     db.prepare(
@@ -342,7 +398,7 @@ export function joinRoom(db: DB, code: string, name: string, now = Date.now()): 
     syncInside(db, code, now);
     const room = requireRoom(db, code);
     if (participants(db, room.id).length >= room.max_participants) {
-      throw new RoomError("В комнате уже 6 человек");
+      throw new RoomError(`В комнате уже ${peopleLabel(room.max_participants)}`);
     }
     db.prepare(
       `INSERT INTO participants (id, room_id, name, token_hash, ready, follows_majority, joined_at)
@@ -388,14 +444,14 @@ export function applyAction(db: DB, code: string, auth: Auth, body: Action, now 
     if (action === "start") {
       assertHost(room, auth.hostToken);
       requireMe(db, room, auth);
-      if (room.phase !== "lobby") throw new RoomError("Сбор уже начался");
+      if (room.phase !== "lobby") throw new RoomError("Добавление вариантов уже началось");
       setPhase(db, room.id, "collecting", now + room.collect_ms);
       return;
     }
 
     if (action === "add") {
       const me = requireMe(db, room, auth);
-      if (room.phase !== "collecting") throw new RoomError("Вариант можно добавить только пока идёт сбор");
+      if (room.phase !== "collecting") throw new RoomError("Вариант можно добавить, пока идёт добавление");
       const fields = cleanOptionFields({
         title: String(body.title ?? ""),
         note: String(body.note ?? ""),
@@ -416,7 +472,7 @@ export function applyAction(db: DB, code: string, auth: Auth, body: Action, now 
 
     if (action === "remove") {
       const me = requireMe(db, room, auth);
-      if (room.phase !== "collecting") throw new RoomError("Удалить вариант можно только пока идёт сбор");
+      if (room.phase !== "collecting") throw new RoomError("Удалить вариант можно, пока идёт добавление");
       const optionId = String(body.optionId ?? "");
       const owned = db
         .prepare("SELECT id FROM options WHERE id = ? AND room_id = ? AND author_id = ?")
@@ -429,7 +485,10 @@ export function applyAction(db: DB, code: string, auth: Auth, body: Action, now 
 
     if (action === "ready") {
       const me = requireMe(db, room, auth);
-      if (room.phase !== "collecting") throw new RoomError("Отметиться можно во время сбора");
+      if (room.phase !== "collecting") throw new RoomError("Отметиться можно, пока добавляют варианты");
+      if (me.ready !== 1 && countOptions(db, room.id) === 0) {
+        throw new RoomError("Сначала нужен хотя бы один вариант");
+      }
       db.prepare("UPDATE participants SET ready = CASE ready WHEN 1 THEN 0 ELSE 1 END WHERE id = ?").run(me.id);
       return;
     }
@@ -458,11 +517,22 @@ export function applyAction(db: DB, code: string, auth: Auth, body: Action, now 
       return;
     }
 
+    if (action === "authors") {
+      assertHost(room, auth.hostToken);
+      requireMe(db, room, auth);
+      const on = body.on === true || body.on === "true" || body.on === 1;
+      db.prepare("UPDATE rooms SET show_authors = ? WHERE id = ?").run(on ? 1 : 0, room.id);
+      return;
+    }
+
     if (action === "finish") {
       assertHost(room, auth.hostToken);
       requireMe(db, room, auth);
       if (room.phase !== "collecting" && room.phase !== "voting") {
         throw new RoomError("Сейчас заканчивать нечего");
+      }
+      if (room.phase === "collecting" && countOptions(db, room.id) === 0) {
+        throw new RoomError("Сначала нужен хотя бы один вариант");
       }
       advance(db, room, now);
       return;

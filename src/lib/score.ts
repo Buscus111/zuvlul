@@ -3,6 +3,7 @@ import {
   isValidMark,
   labelForUnit,
   toUnit,
+  type ChoiceMode,
   type ScaleId,
 } from "./scales";
 
@@ -34,6 +35,7 @@ export type RankedOption = {
   coverage: number;
   topMarks: number;
   counts: Record<string, number>;
+  authorName?: string;
 };
 
 export type Outcome = {
@@ -63,6 +65,7 @@ function reasonFor(outcome: {
   majorityFollowers: number;
   decisiveVoters: number;
   scale: ScaleId;
+  mode: ChoiceMode;
 }): string {
   if (!outcome.winner) {
     if (outcome.decisiveVoters === 0) {
@@ -73,7 +76,12 @@ function reasonFor(outcome: {
 
   const winner = outcome.winner;
   let text: string;
-  if (winner.min != null && winner.min >= 0.5 && winner.coverage === 1) {
+  if (outcome.mode === "close") {
+    text =
+      winner.coverage < 1
+        ? `Победил «${winner.title}»: среди тех, кто его оценил, среднее выше. «Не знаю» не тянет оценку вниз.`
+        : `Победил «${winner.title}»: средняя оценка выше, чем у остальных.`;
+  } else if (winner.min != null && winner.min >= 0.5 && winner.coverage === 1) {
     text = `Победил «${winner.title}»: баланс лучше остальных, и худшая отметка не ниже середины шкалы (${labelForUnit(outcome.scale, winner.min)}).`;
   } else if (winner.min === 0) {
     text = `Победил «${winner.title}»: даже с жёстким отказом его баланс выше, чем у остальных.`;
@@ -89,7 +97,12 @@ function reasonFor(outcome: {
   return text;
 }
 
-export function scoreOptions(scale: ScaleId, options: ScoreOption[], ballots: Ballot[]): Outcome {
+export function scoreOptions(
+  scale: ScaleId,
+  options: ScoreOption[],
+  ballots: Ballot[],
+  mode: ChoiceMode = "diverse",
+): Outcome {
   const decisive = ballots.filter((ballot) => !ballot.followsMajority);
   const majorityFollowers = ballots.length - decisive.length;
   const ranked: (RankedOption & { createdAt: number })[] = options.map((option) => {
@@ -126,14 +139,16 @@ export function scoreOptions(scale: ScaleId, options: ScoreOption[], ballots: Ba
 
     const mean = average(units);
     const min = Math.min(...units);
-    const agreement = MEAN_WEIGHT * mean + MIN_WEIGHT * min;
     const coverage = units.length / decisive.length;
+    // Close options are familiar, so the worst mark should not decide the winner.
+    const score =
+      mode === "close" ? mean : (MEAN_WEIGHT * mean + MIN_WEIGHT * min) * coverage;
     return {
       id: option.id,
       title: option.title,
       note: option.note,
       link: option.link,
-      score: agreement * coverage,
+      score,
       mean,
       min,
       coverage,
@@ -167,6 +182,7 @@ export function scoreOptions(scale: ScaleId, options: ScoreOption[], ballots: Ba
       majorityFollowers,
       decisiveVoters: decisive.length,
       scale,
+      mode,
     }),
   };
 }

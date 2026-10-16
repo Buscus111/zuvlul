@@ -1,5 +1,11 @@
 import type { Cookies } from "@sveltejs/kit";
 
+export const CONSENT_COOKIE = "nandch_consent";
+
+export function hasCookieConsent(cookies: Cookies): boolean {
+  return cookies.get(CONSENT_COOKIE) === "1";
+}
+
 export function participantCookieName(code: string): string {
   return `nandch_p_${code}`;
 }

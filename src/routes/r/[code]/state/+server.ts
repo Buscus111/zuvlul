@@ -1,5 +1,5 @@
 import { json, type RequestHandler } from "@sveltejs/kit";
-import { readAuth, setParticipantCookie } from "#lib/server/cookies";
+import { hasCookieConsent, readAuth, setParticipantCookie } from "#lib/server/cookies";
 import { getDb } from "#lib/server/db";
 import { RoomError } from "#lib/server/errors";
 import { isRoomCode } from "#lib/server/ids";
@@ -27,6 +27,7 @@ export const POST: RequestHandler = async ({ params, cookies, request, url }) =>
 
   try {
     if (body.action === "join") {
+      if (!hasCookieConsent(cookies)) return json({ error: "Сначала разреши куки" }, { status: 403 });
       const joined = joinRoom(getDb(), code, String(body.name ?? ""));
       setParticipantCookie(cookies, code, joined.participantToken);
       const state = getPublicState(getDb(), code, {

@@ -1,5 +1,5 @@
 import type { Outcome } from "./score";
-import type { ScaleId } from "./scales";
+import type { ChoiceMode, ScaleId } from "./scales";
 
 export type Phase = "lobby" | "collecting" | "voting" | "results";
 
@@ -17,12 +17,14 @@ export type MyOption = {
 
 export type BallotOption = MyOption & {
   mineRating: string | null;
+  authorName?: string;
 };
 
 export type PublicState = {
   code: string;
   title: string;
   phase: Phase;
+  mode: ChoiceMode;
   scale: ScaleId;
   serverNow: number;
   phaseEndsAt: number | null;
@@ -31,6 +33,7 @@ export type PublicState = {
   participantCount: number;
   maxParticipants: number;
   optionCount: number;
+  showAuthors: boolean;
   names: RoomPerson[];
   me: null | {
     name: string;

@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "./db";
 import { parseCreateForm } from "./parse";
@@ -81,7 +85,7 @@ describe("room flow", () => {
     expect(JSON.stringify(results.results)).not.toContain("Вася");
   });
 
-  it("stops at six people", () => {
+  it("stops when the chosen number of people is already in the room", () => {
     const db = room();
     const created = createRoom(db, {
       title: "Игра",
@@ -89,30 +93,41 @@ describe("room flow", () => {
       scale: "yesno",
       collectMs: 60_000,
       voteMs: 60_000,
+      maxParticipants: 4,
     });
-    for (let index = 0; index < 5; index += 1) joinRoom(db, created.code, `Игрок ${index}`);
-    expect(() => joinRoom(db, created.code, "Лишний")).toThrow(/6/);
+    for (let index = 0; index < 3; index += 1) joinRoom(db, created.code, `Игрок ${index}`);
+    expect(() => joinRoom(db, created.code, "Лишний")).toThrow(/4 человека/);
+    const state = getPublicState(db, created.code, {
+      participantToken: created.participantToken,
+      hostToken: created.hostToken,
+    });
+    expect(state?.participantCount).toBe(4);
+    expect(state?.maxParticipants).toBe(4);
   });
 
-  it("uses the text scale for the standard setup and keeps a custom scale", () => {
-    const standard = new FormData();
-    standard.set("setup", "standard");
-    standard.set("scale", "yesno");
-    standard.set("title", "Кино");
-    standard.set("name", "Арман");
-    standard.set("collectMinutes", "5");
-    standard.set("voteMinutes", "3");
-    expect(parseCreateForm(standard).scale).toBe("text");
+  it("picks the text scale for different options and 0-10 for close ones", () => {
+    const diverse = new FormData();
+    diverse.set("mode", "diverse");
+    diverse.set("title", "Кино");
+    diverse.set("name", "Арман");
+    diverse.set("collectMinutes", "5");
+    diverse.set("voteMinutes", "3");
+    expect(parseCreateForm(diverse).scale).toBe("text");
+    expect(parseCreateForm(diverse).mode).toBe("diverse");
+    expect(parseCreateForm(diverse).maxParticipants).toBe(4);
+    diverse.set("collectMinutes", "31");
+    expect(() => parseCreateForm(diverse)).toThrow(/30/);
+    diverse.set("collectMinutes", "5");
 
-    const custom = new FormData();
-    custom.set("setup", "custom");
-    custom.set("scale", "score10");
-    custom.set("title", "Ресторан");
-    custom.set("name", "Боря");
-    custom.set("collectMinutes", "10");
-    custom.set("voteMinutes", "5");
-    const input = parseCreateForm(custom);
+    const close = new FormData();
+    close.set("mode", "close");
+    close.set("title", "Ресторан");
+    close.set("name", "Боря");
+    close.set("collectMinutes", "10");
+    close.set("voteMinutes", "5");
+    const input = parseCreateForm(close);
     expect(input.scale).toBe("score10");
+    expect(input.mode).toBe("close");
 
     const db = room();
     const created = createRoom(db, input);
@@ -121,5 +136,50 @@ describe("room flow", () => {
       hostToken: created.hostToken,
     });
     expect(state?.scale).toBe("score10");
+    expect(state?.mode).toBe("close");
+    expect(input.showAuthors).toBe(false);
+  });
+
+  it("hides who proposed an option until the host turns names on", () => {
+    const db = room();
+    const created = createRoom(db, {
+      title: "Ужин",
+      hostName: "Арман",
+      scale: "text",
+      collectMs: 60_000,
+      voteMs: 60_000,
+    });
+    const host = { participantToken: created.participantToken, hostToken: created.hostToken };
+    const anya = joinRoom(db, created.code, "Аня");
+    const guest = { participantToken: anya.participantToken, hostToken: null };
+    applyAction(db, created.code, host, { action: "start" });
+    applyAction(db, created.code, guest, { action: "add", title: "Суп", note: "", link: "" });
+    applyAction(db, created.code, host, { action: "finish" });
+
+    const hidden = getPublicState(db, created.code, guest);
+    expect(hidden?.showAuthors).toBe(false);
+    expect(hidden?.ballot[0]?.authorName).toBeUndefined();
+    expect(JSON.stringify(hidden?.ballot)).not.toContain("Аня");
+
+    const shown = applyAction(db, created.code, host, { action: "authors", on: true });
+    expect(shown.showAuthors).toBe(true);
+    expect(shown.ballot.find((option) => option.title === "Суп")?.authorName).toBe("Аня");
+
+    const hiddenAgain = applyAction(db, created.code, host, { action: "authors", on: false });
+    expect(hiddenAgain.showAuthors).toBe(false);
+    expect(hiddenAgain.ballot[0]?.authorName).toBeUndefined();
+  });
+
+  it("adds the author visibility column to an older database", () => {
+    const file = path.join(os.tmpdir(), `nandch-migrate-${Date.now()}.db`);
+    const raw = new Database(file);
+    raw.exec("CREATE TABLE rooms (id TEXT PRIMARY KEY, title TEXT NOT NULL)");
+    raw.close();
+    const db = openDatabase(file);
+    const columns = db.prepare("PRAGMA table_info(rooms)").all() as { name: string }[];
+    db.close();
+    fs.unlinkSync(file);
+    expect(columns.some((column) => column.name === "show_authors")).toBe(true);
+    expect(columns.some((column) => column.name === "mode")).toBe(true);
   });
 });

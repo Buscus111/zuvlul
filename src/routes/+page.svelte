@@ -1,153 +1,181 @@
 <script lang="ts">
-  import { CUSTOM_SCALES, STANDARD_HINTS } from "#lib/scales";
+  import { CHOICE_MODES } from "#lib/scales";
 
   let { form }: { form: { createError?: string; joinError?: string } | null } =
     $props();
-  let setup = $state("standard");
-  let scale = $state("text");
+  let mode = $state("diverse");
 </script>
 
 <svelte:head>
-  <title>Nandch</title>
+  <title>Zuvlul</title>
 </svelte:head>
 
 <main class="container">
-  <h1>Nandch</h1>
-  <p>
-    Помогает компании выбрать фильм, сериал, место, игру или что угодно ещё.
-  </p>
-  <p>
-    Каждый добавляет варианты со своего телефона. Потом все ставят отметки.
-    Голоса без имён, таймер общий. Сейчас в комнате от 1 до 6 человек.
-  </p>
+  <div class="split">
+    <article>
+      <h2>Войти по коду</h2>
+      {#if form?.joinError}
+        <p role="alert">{form.joinError}</p>
+      {/if}
+      <form class="room-form" method="POST" action="?/join">
+        <div class="group">
+          <label>
+            Код
+            <input
+              name="code"
+              required
+              minlength="6"
+              maxlength="6"
+              autocapitalize="characters"
+              autocomplete="off"
+            />
+          </label>
+          <label>
+            Имя
+            <input name="name" required maxlength="40" autocomplete="nickname" />
+          </label>
+        </div>
+        <button type="submit">Войти</button>
+      </form>
+    </article>
 
-  <article>
-    <h2>Новая комната</h2>
-    {#if form?.createError}
-      <p role="alert">{form.createError}</p>
-    {/if}
-    <form method="POST" action="?/create">
-      <label>
-        Что выбираете
-        <input
-          name="title"
-          required
-          maxlength="80"
-          placeholder="Фильм на пятницу"
-        />
-      </label>
-      <label>
-        Твоё имя
-        <input
-          name="name"
-          required
-          maxlength="40"
-          autocomplete="nickname"
-          placeholder="Арман"
-        />
-        <small
-          >Имя видно в списке комнаты. Кто какой вариант добавил и как голосовал
-          — не видно.</small
-        >
-      </label>
-      <div class="grid">
-        <label>
-          Минуты на сбор
-          <input
-            name="collectMinutes"
-            type="number"
-            min="1"
-            max="180"
-            value="5"
-            required
-          />
-        </label>
-        <label>
-          Минуты на голосование
-          <input
-            name="voteMinutes"
-            type="number"
-            min="1"
-            max="180"
-            value="3"
-            required
-          />
-        </label>
-      </div>
+    <article>
+      <h2>Новая комната</h2>
+      {#if form?.createError}
+        <p role="alert">{form.createError}</p>
+      {/if}
+      <form class="room-form" method="POST" action="?/create">
+        <div class="group">
+          <label>
+            Тема
+            <input
+              name="title"
+              required
+              maxlength="80"
+              placeholder="Фильм на пятницу"
+            />
+          </label>
+          <label>
+            Имя
+            <input
+              name="name"
+              required
+              maxlength="40"
+              autocomplete="nickname"
+              placeholder="Арман"
+            />
+          </label>
+        </div>
 
-      <fieldset>
-        <legend>Как оцениваем</legend>
-        <label>
-          <input
-            type="radio"
-            name="setup"
-            value="standard"
-            bind:group={setup}
-          />
-          Стандарт
-        </label>
-        <p>
-          Одна настройка на привычные компании. Шкала: от «точно нет» до «точно
-          да», плюс «не знаю».
-        </p>
-        <ul>
-          {#each STANDARD_HINTS as hint (hint.title)}
-            <li><strong>{hint.title}.</strong> {hint.text}</li>
-          {/each}
-        </ul>
-        <label>
-          <input type="radio" name="setup" value="custom" bind:group={setup} />
-          Своя шкала
-        </label>
-      </fieldset>
+        <div class="group times">
+          <label>
+            Минуты на варианты
+            <input
+              name="collectMinutes"
+              type="number"
+              min="1"
+              max="30"
+              value="5"
+              required
+            />
+          </label>
+          <label>
+            Минуты на голосование
+            <input
+              name="voteMinutes"
+              type="number"
+              min="1"
+              max="30"
+              value="3"
+              required
+            />
+          </label>
+          <label>
+            Участников
+            <input name="seats" type="number" min="2" max="10" value="4" required />
+          </label>
+        </div>
 
-      {#if setup === "custom"}
-        <fieldset>
-          <legend>Шкала</legend>
-          {#each CUSTOM_SCALES as item (item.id)}
+        <fieldset class="group">
+          <legend>Какие варианты</legend>
+          {#each CHOICE_MODES as item (item.id)}
             <label>
-              <input
-                type="radio"
-                name="scale"
-                value={item.id}
-                bind:group={scale}
-              />
+              <input type="radio" name="mode" value={item.id} bind:group={mode} />
               <strong>{item.title}.</strong>
               {item.text}
             </label>
           {/each}
-          <p>
-            Позже сюда добавятся другие шкалы. Для подсчёта любая сводится к
-            числу от 0 до 1.
-          </p>
         </fieldset>
-      {/if}
 
-      <button type="submit">Создать комнату</button>
-    </form>
-  </article>
+        <label class="authors">
+          <input type="checkbox" name="showAuthors" />
+          Показывать, кто предложил вариант
+        </label>
 
-  <article>
-    <h2>Войти по коду</h2>
-    {#if form?.joinError}
-      <p role="alert">{form.joinError}</p>
-    {/if}
-    <form method="POST" action="?/join">
-      <label>
-        Код
-        <input
-          name="code"
-          required
-          minlength="6"
-          maxlength="6"
-          autocapitalize="characters"
-        />
-      </label>
-      <label>
-        Твоё имя
-        <input name="name" required maxlength="40" autocomplete="nickname" />
-      </label>
-      <button type="submit">Войти</button>
-    </form>
-  </article>
+        <button type="submit">Создать комнату</button>
+      </form>
+    </article>
+  </div>
 </main>
+
+<style>
+  .split {
+    display: grid;
+    gap: 1rem;
+    align-items: start;
+  }
+
+  form > button {
+    margin-bottom: 0;
+  }
+
+  .room-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.75rem;
+  }
+
+  .room-form label,
+  .room-form fieldset,
+  .room-form p,
+  .room-form ul {
+    margin-bottom: 0;
+  }
+
+  .group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+
+  .times {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.85rem;
+    align-items: stretch;
+  }
+
+  .times > label {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    height: 100%;
+    min-width: 0;
+  }
+
+  .room-form fieldset.group {
+    gap: 0.65rem;
+  }
+
+  @media (min-width: 40rem) {
+    .times {
+      grid-template-columns: 1fr 1fr 1fr;
+    }
+  }
+
+  @media (min-width: 42rem) {
+    .split {
+      grid-template-columns: minmax(12.5rem, 16rem) minmax(0, 1fr);
+    }
+  }
+</style>

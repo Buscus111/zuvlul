@@ -1,10 +1,25 @@
-// Rating scales are host-configured. The scorer never sees the raw mark:
-// every scale converts to a unit in [0, 1], and "skip" stays outside the average.
-// Add a scale by extending SCALE_IDS, CUSTOM_SCALES, isValidMark, and toUnit.
+// Two room modes pick both the scale and the formula.
+// "diverse" keeps a coarse verbal scale and weighs the worst mark.
+// "close" uses 0–10 and ranks by the plain mean. "skip" stays outside either average.
 
 export const SCALE_IDS = ["text", "yesno", "score10"] as const;
 
 export type ScaleId = (typeof SCALE_IDS)[number];
+
+export const CHOICE_MODES = [
+  {
+    id: "diverse",
+    title: "Варианты разные",
+    text: "Кто-то может не знать вариант, отказ одного важен. Шкала от «точно нет» до «точно да», плюс «не знаю».",
+  },
+  {
+    id: "close",
+    title: "Варианты близкие",
+    text: "Варианты знакомые и похожие. Шкала от 0 до 10, плюс «не знаю». Побеждает среднее.",
+  },
+] as const;
+
+export type ChoiceMode = (typeof CHOICE_MODES)[number]["id"];
 
 export const TEXT_VALUES = {
   no: 0,
@@ -31,39 +46,6 @@ export const YESNO_MARKS: { value: "no" | "yes" | "skip"; label: string }[] = [
   { value: "skip", label: "Не знаю" },
 ];
 
-export const STANDARD_HINTS = [
-  {
-    title: "Кино и сериал",
-    text: "Кто-то почти наверняка не видел вариант. «Не знаю» не считается отказом.",
-  },
-  {
-    title: "Настолка и игра",
-    text: "Видно разницу между «хорошо» и «точно нет», если часть компании играть не станет.",
-  },
-  {
-    title: "Ресторан, прогулка, поездка",
-    text: "Отказ одного не растворяется в восторге остальных.",
-  },
-] as const;
-
-export const CUSTOM_SCALES: { id: ScaleId; title: string; text: string }[] = [
-  {
-    id: "text",
-    title: "Текстовая",
-    text: "Точно нет, не уверен, норм, хорошо, точно да. Плюс отдельное «не знаю».",
-  },
-  {
-    id: "yesno",
-    title: "Да или нет",
-    text: "Когда варианты уже знакомы и нужно быстро отсечь лишнее.",
-  },
-  {
-    id: "score10",
-    title: "От 0 до 10",
-    text: "Ноль — это отказ, а не «не смотрел». «Не знаю» стоит отдельно.",
-  },
-];
-
 const TEXT_LABELS: Record<TextMark | "skip", string> = {
   no: "точно нет",
   unsure: "не уверен",
@@ -72,6 +54,18 @@ const TEXT_LABELS: Record<TextMark | "skip", string> = {
   yes: "точно да",
   skip: "не знаю",
 };
+
+export function isChoiceMode(value: string): value is ChoiceMode {
+  return CHOICE_MODES.some((mode) => mode.id === value);
+}
+
+export function scaleForMode(mode: ChoiceMode): ScaleId {
+  return mode === "close" ? "score10" : "text";
+}
+
+export function modeLabel(mode: ChoiceMode): string {
+  return mode === "close" ? "Варианты близкие" : "Варианты разные";
+}
 
 export function isScaleId(value: string): value is ScaleId {
   return (SCALE_IDS as readonly string[]).includes(value);

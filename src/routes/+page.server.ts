@@ -1,6 +1,6 @@
 import { fail, redirect } from "@sveltejs/kit";
 import type { Actions } from "./$types";
-import { setHostCookie, setParticipantCookie, readAuth } from "#lib/server/cookies";
+import { hasCookieConsent, setHostCookie, setParticipantCookie, readAuth } from "#lib/server/cookies";
 import { getDb } from "#lib/server/db";
 import { RoomError } from "#lib/server/errors";
 import { isRoomCode } from "#lib/server/ids";
@@ -9,6 +9,7 @@ import { createRoom, getPublicState, joinRoom } from "#lib/server/rooms";
 
 export const actions = {
   create: async ({ request, cookies }) => {
+    if (!hasCookieConsent(cookies)) return fail(403, { createError: "Сначала разреши куки" });
     const form = await request.formData();
     let code = "";
     try {
@@ -24,11 +25,12 @@ export const actions = {
   },
 
   join: async ({ request, cookies }) => {
+    if (!hasCookieConsent(cookies)) return fail(403, { joinError: "Сначала разреши куки" });
     const form = await request.formData();
     const code = String(form.get("code") ?? "")
       .trim()
       .toUpperCase();
-    if (!isRoomCode(code)) return fail(400, { joinError: "Код комнаты — это 6 символов" });
+    if (!isRoomCode(code)) return fail(400, { joinError: "Код комнаты — это 6 цифр" });
 
     const existing = readAuth(cookies, code);
     if (existing.participantToken && getPublicState(getDb(), code, existing)?.me) {

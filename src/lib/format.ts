@@ -1,9 +1,10 @@
-import type { ScaleId } from "./scales";
+import type { ChoiceMode, ScaleId } from "./scales";
 import { countEntries, labelForUnit } from "./scales";
 
-export function agreementPercent(score: number | null): string {
+export function agreementPercent(score: number | null, mode: ChoiceMode = "diverse"): string {
   if (score == null) return "нет оценок";
-  return `согласие ${Math.round(score * 100)}%`;
+  const word = mode === "close" ? "среднее" : "согласие";
+  return `${word} ${Math.round(score * 100)}%`;
 }
 
 export function worstLabel(scale: ScaleId, min: number): string {

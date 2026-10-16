@@ -104,4 +104,30 @@ describe("balance of agreement", () => {
     expect(numbers.winnerId).toBe("high");
     expect(numbers.ranking[0]!.topMarks).toBe(1);
   });
+
+  it("lets a high average beat a safer option when the choices are close", () => {
+    const ratings = [
+      ballot("a", { loved: "10", calm: "6" }),
+      ballot("b", { loved: "10", calm: "6" }),
+      ballot("c", { loved: "0", calm: "6" }),
+    ];
+    const diverse = scoreOptions("score10", [option("loved"), option("calm")], ratings, "diverse");
+    const close = scoreOptions("score10", [option("loved"), option("calm")], ratings, "close");
+    expect(diverse.winnerId).toBe("calm");
+    expect(close.winnerId).toBe("loved");
+    expect(close.ranking[0]!.score).toBeCloseTo(20 / 30);
+    expect(close.reason).toContain("средн");
+  });
+
+  it("keeps an unknown mark out of the close-option average", () => {
+    const outcome = scoreOptions(
+      "score10",
+      [option("film")],
+      [ballot("1", { film: "8" }), ballot("2", { film: "skip" })],
+      "close",
+    );
+    expect(outcome.ranking[0]!.mean).toBeCloseTo(0.8);
+    expect(outcome.ranking[0]!.score).toBeCloseTo(0.8);
+    expect(outcome.ranking[0]!.coverage).toBe(0.5);
+  });
 });

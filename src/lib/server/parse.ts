@@ -1,16 +1,21 @@
-import { isScaleId, type ScaleId } from "#lib/scales";
+import { isChoiceMode, scaleForMode, type ChoiceMode, type ScaleId } from "#lib/scales";
 import { RoomError } from "./errors";
 
-export const MAX_PARTICIPANTS = 6;
+export const MIN_PARTICIPANTS = 2;
+export const MAX_PARTICIPANTS = 10;
+export const DEFAULT_PARTICIPANTS = 4;
 const MIN_MS = 60_000;
-const MAX_MS = 180 * 60_000;
+const MAX_MS = 30 * 60_000;
 
 export type CreateInput = {
   title: string;
   hostName: string;
   scale: ScaleId;
+  mode?: ChoiceMode;
   collectMs: number;
   voteMs: number;
+  maxParticipants?: number;
+  showAuthors?: boolean;
 };
 
 function cleanLine(raw: string): string {
@@ -25,23 +30,34 @@ function requireLength(value: string, min: number, max: number, empty: string, t
 function minutesToMs(raw: unknown, label: string): number {
   const value = typeof raw === "string" ? raw.trim() : "";
   if (!/^\d+$/.test(value)) {
-    throw new RoomError(`${label}: укажи целое число минут, от 1 до 180`);
+    throw new RoomError(`${label}: укажи целое число минут, от 1 до 30`);
   }
   const minutes = Number(value);
   const ms = minutes * 60_000;
   if (ms < MIN_MS || ms > MAX_MS) {
-    throw new RoomError(`${label}: укажи целое число минут, от 1 до 180`);
+    throw new RoomError(`${label}: укажи целое число минут, от 1 до 30`);
   }
   return ms;
 }
 
-export function parseCreateForm(form: FormData): CreateInput {
-  const setup = String(form.get("setup") ?? "standard");
-  if (setup !== "standard" && setup !== "custom") {
-    throw new RoomError("Выбери стандарт или свою шкалу");
+function participantCap(raw: unknown): number {
+  if (raw == null) return DEFAULT_PARTICIPANTS;
+  const value = typeof raw === "string" ? raw.trim() : "";
+  if (!/^\d+$/.test(value)) {
+    throw new RoomError("Участники: укажи целое число от 2 до 10");
   }
-  const scaleRaw = setup === "custom" ? String(form.get("scale") ?? "") : "text";
-  if (!isScaleId(scaleRaw)) throw new RoomError("Выбери шкалу");
+  const count = Number(value);
+  if (count < MIN_PARTICIPANTS || count > MAX_PARTICIPANTS) {
+    throw new RoomError("Участники: укажи целое число от 2 до 10");
+  }
+  return count;
+}
+
+export function parseCreateForm(form: FormData): CreateInput {
+  const modeRaw = String(form.get("mode") ?? "diverse");
+  if (!isChoiceMode(modeRaw)) {
+    throw new RoomError("Выбери, какие варианты будете сравнивать");
+  }
 
   const title = cleanLine(String(form.get("title") ?? ""));
   const hostName = cleanLine(String(form.get("name") ?? ""));
@@ -51,9 +67,12 @@ export function parseCreateForm(form: FormData): CreateInput {
   return {
     title,
     hostName,
-    scale: scaleRaw,
-    collectMs: minutesToMs(form.get("collectMinutes"), "Сбор"),
+    mode: modeRaw,
+    scale: scaleForMode(modeRaw),
+    collectMs: minutesToMs(form.get("collectMinutes"), "Варианты"),
     voteMs: minutesToMs(form.get("voteMinutes"), "Голосование"),
+    maxParticipants: participantCap(form.get("seats")),
+    showAuthors: form.get("showAuthors") != null,
   };
 }
 

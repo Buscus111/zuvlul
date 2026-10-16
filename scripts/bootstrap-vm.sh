@@ -35,14 +35,14 @@ if ! command -v docker >/dev/null 2>&1; then
   fi
 fi
 
-install_dir=/opt/nandch
+install_dir=/opt/zuvlul
 run mkdir -p "${install_dir}"
 if [[ "${EUID}" -ne 0 ]]; then
   sudo chown "${USER}:${USER}" "${install_dir}"
 fi
 
 if [[ ! -d ${install_dir}/.git ]]; then
-  git clone https://github.com/Buscus111/nandch.git "${install_dir}"
+  git clone https://github.com/Buscus111/zuvlul.git "${install_dir}"
 fi
 
 cd "${install_dir}"

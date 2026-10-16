@@ -25,4 +25,4 @@ jobs:
           printf '%s\n' "${SSH_KEY}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "${SSH_USER}@${SSH_HOST}" \
-            'cd /opt/nandch && git pull --ff-only && sudo docker compose up -d --build'
+            'cd /opt/zuvlul && git pull --ff-only && sudo docker compose up -d --build'
